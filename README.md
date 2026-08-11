@@ -1,6 +1,6 @@
 # べんきょう帳（GitHub Pages版）
 
-`KAT-astro/TB_progress` に置いてGitHub Pagesで公開するための静的版です。
+`KAT-astro/TB_progress` に置いてGitHub Pagesで公開するための静的版
 
 ## 含まれている機能
 
@@ -15,7 +15,7 @@
 
 ## GitHub Pagesへの置き方
 
-このフォルダの中身を`TB_progress`リポジトリのルートにアップロードしてください。
+このフォルダの中身を`TB_progress`リポジトリのルートにアップロード
 
 1. `TB_progress`の **Settings → Pages** を開く
 2. **Source** を **GitHub Actions** にする
@@ -24,6 +24,8 @@
 
 ## データについて
 
-通常はブラウザの`localStorage`に保存します。さらに、同梱の`github-sync-worker`を無料のCloudflare Workerとしてデプロイすると、画面上部からGitHub OAuthで接続し、privateリポジトリ`KAT-astro/TB_progress_data`の`study-data.json`へ保存できます。
+- 通常はブラウザの`localStorage`に保存
+- 同梱の`github-sync-worker`を無料のCloudflare Workerとしてデプロイすると、画面上部からGitHub OAuthで接続し、privateリポジトリ`KAT-astro/TB_progress_data`の`study-data.json`へ保存
 
-同期を使う場合の手順は[`github-sync-worker/README.md`](github-sync-worker/README.md)にあります。GitHubのClient Secretやアクセストークンは公開Pages側に置きません。
+- 同期を使う場合の手順は[`github-sync-worker/README.md`](github-sync-worker/README.md)
+  - GitHubのClient Secretやアクセストークンは公開Pages側に置かない
