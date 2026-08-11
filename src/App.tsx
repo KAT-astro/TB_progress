@@ -657,13 +657,6 @@ export default function Home() {
       </header>
 
       <div className="content-wrap">
-        <section className="intro-row">
-          <div><p className="eyebrow">YOUR READING LOG</p><p className="intro-copy">勉強したページを記録するだけで、読んだ範囲と残りがすぐ分かります。</p></div>
-          {books.length > 0 && <div className="book-count"><strong>{books.length}</strong><span>登録中の参考書</span></div>}
-        </section>
-
-        <GitHubSyncPanel apiUrl={syncApiUrl} onApiUrlChange={setSyncApiUrl} connected={Boolean(syncSession)} user={syncUser} autoSync={autoSync} onAutoSyncChange={setAutoSync} busy={syncBusy} status={syncStatus} onConnect={connectGitHub} onDisconnect={disconnectGitHub} onLoad={loadGitHubData} onSave={() => { void saveGitHubData(); }} />
-
         {books.length === 0 ? (
           <section className="onboarding-card">
             <div className="onboarding-icon" aria-hidden="true">✦</div>
@@ -678,7 +671,6 @@ export default function Home() {
         ) : (
           <>
             <section className="book-switcher">
-              <div className="book-select-wrap"><span className="mini-label">いま勉強している本</span><select value={activeBook?.id} onChange={(event) => { setActiveBookId(event.target.value); setShowBookSettings(false); }} aria-label="参考書を選択">{books.map((book) => <option key={book.id} value={book.id}>{book.title}</option>)}</select></div>
               <button className="quiet-button" type="button" onClick={() => setShowBookForm((value) => !value)}>＋ 参考書を追加</button>
             </section>
 
@@ -697,6 +689,7 @@ export default function Home() {
             <section className="footer-actions"><p>記録はこの端末だけに保存されます。ブラウザのデータを消去すると記録も消えます。</p><button className="delete-book-button" type="button" onClick={removeBook}>この参考書を削除</button></section>
           </>
         )}
+        <GitHubSyncPanel apiUrl={syncApiUrl} onApiUrlChange={setSyncApiUrl} connected={Boolean(syncSession)} user={syncUser} autoSync={autoSync} onAutoSyncChange={setAutoSync} busy={syncBusy} status={syncStatus} onConnect={connectGitHub} onDisconnect={disconnectGitHub} onLoad={loadGitHubData} onSave={() => { void saveGitHubData(); }} />
       </div>
       {message && <div className="toast" role="status">{message}</div>}
     </main>
