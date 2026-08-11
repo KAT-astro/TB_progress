@@ -1,0 +1,4 @@
+GITHUB_CLIENT_ID="ここにGitHub OAuth AppのClient ID"
+GITHUB_CLIENT_SECRET="ここにGitHub OAuth AppのClient Secret"
+SESSION_SECRET="32文字以上のランダムな秘密文字列"
+PUBLIC_URL="https://あなたのworker.workers.dev"

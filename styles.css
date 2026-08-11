@@ -1,0 +1,9 @@
+name = "tb-progress-github-sync"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[vars]
+APP_ORIGIN = "https://kat-astro.github.io"
+GITHUB_DATA_REPO = "KAT-astro/TB_progress_data"
+GITHUB_DATA_PATH = "study-data.json"
+GITHUB_DATA_BRANCH = "main"
