@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type PageRange = { start: number; end: number; name?: string };
 
@@ -36,7 +36,19 @@ type StoredState = {
   activeBookId: string;
 };
 
+type GitHubUser = { login: string; avatar_url?: string };
+type SyncStatus = "idle" | "checking" | "working" | "connected" | "error";
+
+type RemoteDataFile = {
+  app: "TB_progress";
+  schemaVersion: 1;
+  updatedAt: string;
+  state: StoredState;
+};
+
 const STORAGE_KEY = "study-progress-v1";
+const SYNC_CONFIG_KEY = "study-progress-github-sync-v1";
+const SYNC_SESSION_KEY = "study-progress-github-session-v1";
 const BOOK_COLORS = ["#ed6b51", "#3d3a56", "#d79745", "#62ad7c", "#8a70c4", "#4f8ea6"];
 const emptyDraft = (): RangeDraft[] => [{ start: "", end: "", name: "" }];
 
@@ -148,6 +160,88 @@ function getBookColor(bookId: string, books: Book[]) {
   return BOOK_COLORS[(index < 0 ? 0 : index) % BOOK_COLORS.length];
 }
 
+function normalizeSyncApiUrl(value: string) {
+  return value.trim().replace(/\/+$/, "");
+}
+
+function migrateState(parsed: Partial<StoredState> | null | undefined) {
+  const legacyBooks = Array.isArray(parsed?.books) ? parsed.books : [];
+  const migratedBooks: Book[] = legacyBooks.map((book) => {
+    const legacy = book as LegacyBook;
+    const fallbackStart = Number.isInteger(legacy.startPage) ? Number(legacy.startPage) : 1;
+    const fallbackEnd = Number.isInteger(legacy.endPage) ? Number(legacy.endPage) : Number.isInteger(legacy.totalPages) ? Number(legacy.totalPages) : fallbackStart;
+    const pageRanges = Array.isArray(legacy.pageRanges) && legacy.pageRanges.length
+      ? normalizeRanges(legacy.pageRanges)
+      : [{ start: fallbackStart, end: Math.max(fallbackStart, fallbackEnd) }];
+    return {
+      id: String(legacy.id ?? makeId()),
+      title: String(legacy.title ?? "参考書"),
+      pageRanges,
+      goalDate: String(legacy.goalDate ?? ""),
+      link: String(legacy.link ?? ""),
+    };
+  });
+  return {
+    books: migratedBooks,
+    entries: Array.isArray(parsed?.entries) ? parsed.entries : [],
+    activeBookId: migratedBooks.some((book) => book.id === parsed?.activeBookId) ? String(parsed?.activeBookId) : migratedBooks[0]?.id ?? "",
+  };
+}
+
+function unwrapRemoteState(value: unknown): Partial<StoredState> | null {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as { state?: unknown };
+  const state = candidate.state && typeof candidate.state === "object" ? candidate.state : value;
+  return state as Partial<StoredState>;
+}
+
+function makeRemoteData(books: Book[], entries: StudyEntry[], activeBookId: string): RemoteDataFile {
+  return {
+    app: "TB_progress",
+    schemaVersion: 1,
+    updatedAt: new Date().toISOString(),
+    state: { books, entries, activeBookId },
+  };
+}
+
+type GitHubSyncPanelProps = {
+  apiUrl: string;
+  onApiUrlChange: (value: string) => void;
+  connected: boolean;
+  user: GitHubUser | null;
+  autoSync: boolean;
+  onAutoSyncChange: (value: boolean) => void;
+  busy: boolean;
+  status: SyncStatus;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  onLoad: () => void;
+  onSave: () => void;
+};
+
+function GitHubSyncPanel({ apiUrl, onApiUrlChange, connected, user, autoSync, onAutoSyncChange, busy, status, onConnect, onDisconnect, onLoad, onSave }: GitHubSyncPanelProps) {
+  const statusText = status === "checking" ? "接続を確認中…" : status === "working" ? "同期中…" : status === "error" ? "同期エラー" : connected ? "接続済み" : "未接続";
+  return (
+    <section className="sync-card card" aria-label="GitHub同期">
+      <div className="sync-heading">
+        <div><p className="eyebrow">PRIVATE BACKUP</p><h2>GitHubに自動同期</h2></div>
+        <span className={`sync-pill ${connected ? "connected" : ""}`}><span className="status-dot" />{statusText}</span>
+      </div>
+      <p className="sync-copy">学習記録は端末にも保存し、接続するとprivateリポジトリ <strong>KAT-astro/TB_progress_data</strong> にバックアップできます。</p>
+      <label className="sync-url-field">同期APIのURL（初回のみ）<input type="url" value={apiUrl} onChange={(event) => onApiUrlChange(event.target.value)} placeholder="https://あなたのworker.workers.dev" /></label>
+      {!connected ? (
+        <div className="sync-actions"><button className="outline-button" type="button" onClick={onConnect} disabled={busy || !apiUrl.trim()}>GitHubで接続</button><span className="sync-helper">Worker URLを入力してから接続してください。</span></div>
+      ) : (
+        <>
+          <div className="sync-user"><span>GitHub: <strong>@{user?.login ?? "接続中"}</strong></span><button className="link-cancel-button" type="button" onClick={onDisconnect}>接続を解除</button></div>
+          <div className="sync-actions sync-actions-connected"><button className="outline-button" type="button" onClick={onLoad} disabled={busy}>GitHubから読み込む</button><button className="primary-button" type="button" onClick={onSave} disabled={busy}>GitHubへ保存</button><label className="sync-checkbox"><input type="checkbox" checked={autoSync} onChange={(event) => onAutoSyncChange(event.target.checked)} />変更時に自動同期</label></div>
+        </>
+      )}
+      <p className="sync-note">保存先: <code>TB_progress_data/study-data.json</code> · {connected ? "この端末から安全に読み書きします" : "同期しない間も端末内では使えます"}</p>
+    </section>
+  );
+}
+
 export default function Home() {
   const [books, setBooks] = useState<Book[]>([]);
   const [entries, setEntries] = useState<StudyEntry[]>([]);
@@ -170,31 +264,34 @@ export default function Home() {
   const [calendarMonth, setCalendarMonth] = useState(todayString().slice(0, 7));
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(todayString());
   const [showCalendar, setShowCalendar] = useState(false);
+  const [syncApiUrl, setSyncApiUrl] = useState("");
+  const [syncSession, setSyncSession] = useState("");
+  const [syncUser, setSyncUser] = useState<GitHubUser | null>(null);
+  const [autoSync, setAutoSync] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
+  const syncPopupRef = useRef<Window | null>(null);
+  const syncBusyRef = useRef(false);
+  const lastSyncedFingerprintRef = useRef("");
+  const syncSaveTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        const parsed = JSON.parse(saved) as StoredState;
-        const migratedBooks = (parsed.books ?? []).map((book) => {
-          const legacy = book as LegacyBook;
-          const fallbackStart = Number.isInteger(legacy.startPage) ? Number(legacy.startPage) : 1;
-          const fallbackEnd = Number.isInteger(legacy.endPage) ? Number(legacy.endPage) : Number.isInteger(legacy.totalPages) ? Number(legacy.totalPages) : fallbackStart;
-          const pageRanges = Array.isArray(legacy.pageRanges) && legacy.pageRanges.length
-            ? normalizeRanges(legacy.pageRanges)
-            : [{ start: fallbackStart, end: Math.max(fallbackStart, fallbackEnd) }];
-          return {
-            id: String(legacy.id ?? makeId()),
-            title: String(legacy.title ?? "参考書"),
-            pageRanges,
-            goalDate: String(legacy.goalDate ?? ""),
-            link: String(legacy.link ?? ""),
-          };
-        });
-        setBooks(migratedBooks);
-        setEntries(parsed.entries ?? []);
-        setActiveBookId(migratedBooks.some((book) => book.id === parsed.activeBookId) ? parsed.activeBookId : migratedBooks[0]?.id ?? "");
+        const migrated = migrateState(JSON.parse(saved) as StoredState);
+        setBooks(migrated.books);
+        setEntries(migrated.entries);
+        setActiveBookId(migrated.activeBookId);
       }
+      const savedSyncConfig = window.localStorage.getItem(SYNC_CONFIG_KEY);
+      if (savedSyncConfig) {
+        const config = JSON.parse(savedSyncConfig) as { apiUrl?: string; autoSync?: boolean };
+        setSyncApiUrl(normalizeSyncApiUrl(String(config.apiUrl ?? "")));
+        setAutoSync(Boolean(config.autoSync));
+      }
+      const savedSession = window.sessionStorage.getItem(SYNC_SESSION_KEY);
+      if (savedSession) setSyncSession(savedSession);
     } catch {
       // If stored data is damaged, start with an empty local notebook.
     } finally {
@@ -206,6 +303,48 @@ export default function Home() {
     if (!isReady) return;
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ books, entries, activeBookId } satisfies StoredState));
   }, [books, entries, activeBookId, isReady]);
+
+  useEffect(() => {
+    if (!isReady) return;
+    window.localStorage.setItem(SYNC_CONFIG_KEY, JSON.stringify({ apiUrl: normalizeSyncApiUrl(syncApiUrl), autoSync }));
+  }, [syncApiUrl, autoSync, isReady]);
+
+  useEffect(() => {
+    if (!syncSession) {
+      window.sessionStorage.removeItem(SYNC_SESSION_KEY);
+      return;
+    }
+    window.sessionStorage.setItem(SYNC_SESSION_KEY, syncSession);
+  }, [syncSession]);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type !== "tb-github-auth" && event.data?.type !== "tb-github-auth-error") return;
+      let apiOrigin = "";
+      try {
+        apiOrigin = new URL(normalizeSyncApiUrl(syncApiUrl)).origin;
+      } catch {
+        return;
+      }
+      if (event.origin !== apiOrigin) return;
+      if (event.data.type === "tb-github-auth-error") {
+        setSyncBusy(false);
+        syncBusyRef.current = false;
+        setSyncStatus("error");
+        flash(typeof event.data.message === "string" ? event.data.message : "GitHub接続に失敗しました");
+        return;
+      }
+      if (typeof event.data.session !== "string") return;
+      setSyncSession(event.data.session);
+      setSyncStatus("checking");
+      setSyncBusy(false);
+      syncBusyRef.current = false;
+      syncPopupRef.current = null;
+      flash("GitHubに接続しました");
+    };
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [syncApiUrl]);
 
   const activeBook = books.find((book) => book.id === activeBookId) ?? books[0];
   const activeAllowedRanges = activeBook ? normalizeRanges(activeBook.pageRanges) : [];
@@ -247,6 +386,131 @@ export default function Home() {
     setMessage(text);
     window.setTimeout(() => setMessage(""), 2600);
   };
+
+  const stateFingerprint = useMemo(() => JSON.stringify({ books, entries, activeBookId }), [books, entries, activeBookId]);
+
+  async function syncRequest(path: string, init: RequestInit = {}, apiUrlOverride = syncApiUrl, sessionOverride = syncSession) {
+    const base = normalizeSyncApiUrl(apiUrlOverride);
+    if (!base) throw new Error("同期APIのURLを入力してください");
+    const headers = new Headers(init.headers);
+    headers.set("Accept", "application/json");
+    if (init.body) headers.set("Content-Type", "application/json");
+    if (sessionOverride) headers.set("Authorization", `Bearer ${sessionOverride}`);
+    const response = await fetch(`${base}${path}`, { ...init, headers });
+    const payload = await response.json().catch(() => ({})) as { error?: string } & Record<string, unknown>;
+    if (!response.ok) throw new Error(typeof payload.error === "string" ? payload.error : `同期APIが応答しません（${response.status}）`);
+    return payload;
+  }
+
+  async function verifySyncSession(apiUrl = syncApiUrl, session = syncSession) {
+    if (!apiUrl || !session) return;
+    setSyncStatus("checking");
+    try {
+      const payload = await syncRequest("/api/me", {}, apiUrl, session) as { user?: GitHubUser };
+      setSyncUser(payload.user ?? null);
+      setSyncStatus("connected");
+    } catch {
+      setSyncSession("");
+      setSyncUser(null);
+      setAutoSync(false);
+      setSyncStatus("error");
+      flash("GitHub接続の期限が切れました。もう一度接続してください。");
+    }
+  }
+
+  function connectGitHub() {
+    const base = normalizeSyncApiUrl(syncApiUrl);
+    if (!base) {
+      setSyncStatus("error");
+      flash("先に同期APIのURLを入力してください");
+      return;
+    }
+    const popup = window.open(`${base}/auth/start`, "tb-progress-github-auth", "popup,width=520,height=720");
+    if (!popup) {
+      flash("ポップアップがブロックされました。ブラウザの設定で許可してください。");
+      return;
+    }
+    syncPopupRef.current = popup;
+    setSyncBusy(true);
+    syncBusyRef.current = true;
+    setSyncStatus("checking");
+  }
+
+  function disconnectGitHub() {
+    setSyncSession("");
+    setSyncUser(null);
+    setAutoSync(false);
+    setSyncStatus("idle");
+    setSyncBusy(false);
+    syncBusyRef.current = false;
+    flash("GitHubとの接続を解除しました");
+  }
+
+  async function loadGitHubData() {
+    if (!syncSession || !syncApiUrl || syncBusyRef.current) return;
+    if (!window.confirm("GitHubのデータで、この端末の学習記録を置き換えますか？")) return;
+    setSyncBusy(true);
+    syncBusyRef.current = true;
+    setSyncStatus("working");
+    try {
+      const payload = await syncRequest("/api/data") as { exists?: boolean; data?: unknown };
+      if (!payload.exists || !payload.data) {
+        flash("GitHubに保存データがまだありません");
+        setSyncStatus("connected");
+        return;
+      }
+      const migrated = migrateState(unwrapRemoteState(payload.data));
+      setBooks(migrated.books);
+      setEntries(migrated.entries);
+      setActiveBookId(migrated.activeBookId);
+      lastSyncedFingerprintRef.current = JSON.stringify({ books: migrated.books, entries: migrated.entries, activeBookId: migrated.activeBookId });
+      setSyncStatus("connected");
+      flash("GitHubから学習記録を読み込みました");
+    } catch (error) {
+      setSyncStatus("error");
+      flash(error instanceof Error ? error.message : "GitHubからの読み込みに失敗しました");
+    } finally {
+      setSyncBusy(false);
+      syncBusyRef.current = false;
+    }
+  }
+
+  async function saveGitHubData(showToast = true) {
+    if (!syncSession || !syncApiUrl || syncBusyRef.current) return;
+    setSyncBusy(true);
+    syncBusyRef.current = true;
+    setSyncStatus("working");
+    try {
+      await syncRequest("/api/data", { method: "PUT", body: JSON.stringify({ data: makeRemoteData(books, entries, activeBookId) }) });
+      lastSyncedFingerprintRef.current = stateFingerprint;
+      setSyncStatus("connected");
+      if (showToast) flash("GitHubに学習記録を保存しました");
+    } catch (error) {
+      setSyncStatus("error");
+      flash(error instanceof Error ? error.message : "GitHubへの保存に失敗しました");
+    } finally {
+      setSyncBusy(false);
+      syncBusyRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    if (!isReady || !syncSession || !syncApiUrl) return;
+    void verifySyncSession();
+  }, [isReady, syncSession, syncApiUrl]);
+
+  useEffect(() => {
+    if (!isReady || !autoSync || !syncSession || !syncApiUrl || stateFingerprint === lastSyncedFingerprintRef.current) return;
+    if (syncSaveTimerRef.current) window.clearTimeout(syncSaveTimerRef.current);
+    syncSaveTimerRef.current = window.setTimeout(() => {
+      syncSaveTimerRef.current = null;
+      void saveGitHubData(false);
+    }, 1200);
+    return () => {
+      if (syncSaveTimerRef.current) window.clearTimeout(syncSaveTimerRef.current);
+      syncSaveTimerRef.current = null;
+    };
+  }, [isReady, autoSync, syncSession, syncApiUrl, stateFingerprint]);
 
   function moveCalendarMonth(amount: number) {
     const [year, month] = calendarMonth.split("-").map(Number);
@@ -389,14 +653,16 @@ export default function Home() {
       <header className="topbar">
         <div className="brand-mark" aria-hidden="true">◒</div>
         <div><p className="brand-name">べんきょう帳</p><p className="brand-caption">Study progress, made simple.</p></div>
-        <span className="local-badge"><span className="status-dot" />端末内に保存</span>
+        <span className="local-badge"><span className="status-dot" />{syncSession ? "GitHubと同期中" : "端末内に保存"}</span>
       </header>
 
       <div className="content-wrap">
         <section className="intro-row">
-          <div><p className="eyebrow">YOUR READING LOG</p><h1>今日の一歩を、<em>見える進捗</em>に。</h1><p className="intro-copy">勉強したページを記録するだけで、読んだ範囲と残りがすぐ分かります。</p></div>
+          <div><p className="eyebrow">YOUR READING LOG</p><p className="intro-copy">勉強したページを記録するだけで、読んだ範囲と残りがすぐ分かります。</p></div>
           {books.length > 0 && <div className="book-count"><strong>{books.length}</strong><span>登録中の参考書</span></div>}
         </section>
+
+        <GitHubSyncPanel apiUrl={syncApiUrl} onApiUrlChange={setSyncApiUrl} connected={Boolean(syncSession)} user={syncUser} autoSync={autoSync} onAutoSyncChange={setAutoSync} busy={syncBusy} status={syncStatus} onConnect={connectGitHub} onDisconnect={disconnectGitHub} onLoad={loadGitHubData} onSave={() => { void saveGitHubData(); }} />
 
         {books.length === 0 ? (
           <section className="onboarding-card">

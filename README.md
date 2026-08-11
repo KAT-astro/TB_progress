@@ -24,5 +24,6 @@
 
 ## データについて
 
-この静的版は、現在のアプリと同じくブラウザの`localStorage`に学習データを保存します。
-`TB_progress_data`へ自動同期するには、GitHubログインとAPI接続を追加する必要があります。公開アプリにアクセストークンを埋め込まないため、その同期処理は別段階で設定します。
+通常はブラウザの`localStorage`に保存します。さらに、同梱の`github-sync-worker`を無料のCloudflare Workerとしてデプロイすると、画面上部からGitHub OAuthで接続し、privateリポジトリ`KAT-astro/TB_progress_data`の`study-data.json`へ保存できます。
+
+同期を使う場合の手順は[`github-sync-worker/README.md`](github-sync-worker/README.md)にあります。GitHubのClient Secretやアクセストークンは公開Pages側に置きません。
