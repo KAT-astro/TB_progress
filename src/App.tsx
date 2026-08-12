@@ -131,6 +131,7 @@ function getBookStats(book: Book, entries: StudyEntry[]) {
 }
 
 function formatDate(date: string) {
+  if (!date) return "日付不明";
   return new Intl.DateTimeFormat("ja-JP", { month: "short", day: "numeric", weekday: "short" }).format(new Date(`${date}T00:00:00`));
 }
 
@@ -256,10 +257,18 @@ export default function Home() {
   const [settingsRanges, setSettingsRanges] = useState<RangeDraft[]>(emptyDraft);
   const [settingsLink, setSettingsLink] = useState("");
   const [studyDate, setStudyDate] = useState(todayString());
+  const [studyDateUnknown, setStudyDateUnknown] = useState(false);
   const [fromPage, setFromPage] = useState("");
   const [toPage, setToPage] = useState("");
   const [studyLabel, setStudyLabel] = useState("");
   const [note, setNote] = useState("");
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [editDate, setEditDate] = useState("");
+  const [editDateUnknown, setEditDateUnknown] = useState(false);
+  const [editFromPage, setEditFromPage] = useState("");
+  const [editToPage, setEditToPage] = useState("");
+  const [editLabel, setEditLabel] = useState("");
+  const [editNote, setEditNote] = useState("");
   const [message, setMessage] = useState("");
   const [calendarMonth, setCalendarMonth] = useState(todayString().slice(0, 7));
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(todayString());
@@ -364,7 +373,10 @@ export default function Home() {
   const calendarDays = useMemo(() => getMonthDays(calendarMonth), [calendarMonth]);
   const calendarEntriesByDate = useMemo(() => {
     const grouped: Record<string, StudyEntry[]> = {};
-    for (const entry of entries) (grouped[entry.date] ??= []).push(entry);
+    for (const entry of entries) {
+      if (!entry.date) continue;
+      (grouped[entry.date] ??= []).push(entry);
+    }
     return grouped;
   }, [entries]);
   const selectedCalendarEntries = calendarEntriesByDate[selectedCalendarDate] ?? [];
@@ -591,6 +603,10 @@ export default function Home() {
     if (!activeBook) return;
     const start = Number(fromPage);
     const end = Number(toPage || fromPage);
+    if (!studyDateUnknown && !studyDate) {
+      setMessage("日付を入力するか、「日付不明」にチェックしてください");
+      return;
+    }
     if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < 1) {
       setMessage("ページ番号を入力してください");
       return;
@@ -602,11 +618,13 @@ export default function Home() {
       setMessage("学習記録は、登録した1つのページ区間内に収めてください");
       return;
     }
-    setEntries((current) => [...current, { id: makeId(), bookId: activeBook.id, date: studyDate, fromPage: low, toPage: high, label: studyLabel.trim() || undefined, note: note.trim() }]);
+    setEntries((current) => [...current, { id: makeId(), bookId: activeBook.id, date: studyDateUnknown ? "" : studyDate, fromPage: low, toPage: high, label: studyLabel.trim() || undefined, note: note.trim() }]);
     setFromPage("");
     setToPage("");
     setStudyLabel("");
     setNote("");
+    setStudyDateUnknown(false);
+    setStudyDate(todayString());
     flash(`${low}〜${high}ページを記録しました`);
   }
 
@@ -619,6 +637,47 @@ export default function Home() {
     setToPage(String(Math.min(start + 9, range.end)));
   }
 
+  function startEditingEntry(entry: StudyEntry) {
+    setEditingEntryId(entry.id);
+    setEditDate(entry.date);
+    setEditDateUnknown(!entry.date);
+    setEditFromPage(String(entry.fromPage));
+    setEditToPage(String(entry.toPage));
+    setEditLabel(entry.label ?? "");
+    setEditNote(entry.note ?? "");
+  }
+
+  function cancelEditingEntry() {
+    setEditingEntryId(null);
+    setEditDate("");
+    setEditDateUnknown(false);
+    setEditFromPage("");
+    setEditToPage("");
+    setEditLabel("");
+    setEditNote("");
+  }
+
+  function saveEditedEntry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingEntryId || !activeBook) return;
+    const start = Number(editFromPage);
+    const end = Number(editToPage || editFromPage);
+    if ((!editDateUnknown && !editDate) || !Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < 1) {
+      setMessage("日付とページ番号を正しく入力してください");
+      return;
+    }
+    const low = Math.min(start, end);
+    const high = Math.max(start, end);
+    const containingRange = activeAllowedRanges.some((range) => low >= range.start && high <= range.end);
+    if (!containingRange) {
+      setMessage("学習記録は、登録した1つのページ区間内に収めてください");
+      return;
+    }
+    setEntries((current) => current.map((entry) => entry.id === editingEntryId ? { ...entry, date: editDateUnknown ? "" : editDate, fromPage: low, toPage: high, label: editLabel.trim() || undefined, note: editNote.trim() } : entry));
+    cancelEditingEntry();
+    flash(`${low}〜${high}ページの記録を変更しました`);
+  }
+
   function updateGoal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!activeBook) return;
@@ -629,7 +688,12 @@ export default function Home() {
   }
 
   function removeEntry(id: string) {
+    const entry = entries.find((item) => item.id === id);
+    if (!entry) return;
+    const pageText = entry.fromPage === entry.toPage ? `${entry.fromPage}ページ` : `${entry.fromPage}〜${entry.toPage}ページ`;
+    if (!window.confirm(`${entry.date || "日付不明"}\n${entry.label ? `${entry.label}（${pageText}）` : pageText}\nこの学習記録を削除しますか？`)) return;
     setEntries((current) => current.filter((entry) => entry.id !== id));
+    if (editingEntryId === id) cancelEditingEntry();
     flash("記録を削除しました");
   }
 
@@ -685,7 +749,40 @@ export default function Home() {
 
             <section className="dashboard-grid"><article className="progress-card card"><div className="card-heading"><div><p className="eyebrow">CURRENT PROGRESS</p><h2>{activeBook?.title}</h2><div className="active-link-actions">{activeBook?.link && <a className="active-book-link" href={activeBook.link} target="_blank" rel="noreferrer">↗ 登録したリンクを開く</a>}<button className="link-edit-button" type="button" onClick={openBookSettings}>{activeBook?.link ? "設定を編集" : "＋ リンク・区間を編集"}</button></div></div><span className="book-page-count">{rangeLabel(activeBook?.pageRanges ?? [])}</span></div><div className="progress-main"><div className="progress-ring" style={{ background: `conic-gradient(#ed6b51 ${percentage}%, #ebe5db ${percentage}% 100%)` }}><div className="ring-inner"><strong>{percentage}<small>%</small></strong><span>読了</span></div></div><div className="progress-stats"><div><strong>{progress.coveredPages}</strong><span>学習済みページ</span></div><div><strong>{remainingPages}</strong><span>残りページ</span></div></div></div><div className="page-map-box"><div className="map-header"><div><span className="mini-label">PAGE MAP</span><strong>学習したページ</strong></div><div className="map-legend"><span><i className="legend-swatch studied" />1回</span><span><i className="legend-swatch repeat-two" />2回</span><span><i className="legend-swatch repeat-three" />3回以上</span><span><i className="legend-swatch" />未学習</span></div></div>{pageMapGroups.map((group) => <div className="page-map-group" key={`${group.range.start}-${group.range.end}`}><div className="page-map-range-label">{pageRangeCaption(group.range)}</div><div className="page-map" style={{ gridTemplateColumns: `repeat(${group.segments.length}, minmax(0, 1fr))` }} aria-label={`${group.range.start}〜${group.range.end}ページのマップ`}>{group.segments.map((segment) => <span className={`page-segment ${segment.studyCount === 1 ? "studied" : ""} ${segment.studyCount === 2 ? "repeat-two" : ""} ${segment.studyCount >= 3 ? "repeat-three" : ""}`} key={`${segment.start}-${segment.end}`} title={`${segment.start}〜${segment.end}ページ（学習${segment.studyCount}回）`} />)}</div></div>)}</div><div className="range-summary"><span className="summary-icon">↗</span><div><span className="mini-label">学習した範囲</span><strong>{progress.ranges.length ? progress.ranges.map((range) => `${range.start}–${range.end}ページ`).join("・") : "まだ記録がありません"}</strong></div></div></article><article className="goal-card card"><div className="card-heading"><div><p className="eyebrow">READING GOAL</p><h2>読了目標</h2></div><span className="target-icon">⌁</span></div><form onSubmit={updateGoal} className="goal-form"><label>この本を読み終える日<input name="goalDate" type="date" value={activeBook?.goalDate ?? ""} onChange={(event) => setBooks((current) => current.map((book) => book.id === activeBook?.id ? { ...book, goalDate: event.target.value } : book))} /></label>{activeBook?.goalDate ? <div className="goal-result"><strong>{remainingDays !== null && remainingDays >= 0 ? `${remainingDays}日` : "期限超過"}</strong><span>あと{remainingPages}ページ<br />1日 約{pagesPerDay ?? 0}ページ</span></div> : <p className="goal-hint">目標日を決めると、1日の目安を計算します。</p>}<button className="outline-button" type="submit">目標を保存</button></form></article></section>
 
-            <section className="lower-grid"><article className="log-card card"><div className="section-heading"><div><p className="eyebrow">ADD STUDY LOG</p><h2>勉強したページを記録</h2></div><span className="pencil-icon">✎</span></div><form className="study-form" onSubmit={addStudyEntry}><label className="date-field">日付<input type="date" value={studyDate} onChange={(event) => setStudyDate(event.target.value)} /></label><div className="page-fields"><label>開始ページ<input type="number" min={activeAllowedRanges[0]?.start} max={activeAllowedRanges.at(-1)?.end} inputMode="numeric" value={fromPage} onChange={(event) => setFromPage(event.target.value)} placeholder={String(activeAllowedRanges[0]?.start ?? 1)} /></label><span>〜</span><label>終了ページ<input type="number" min={activeAllowedRanges[0]?.start} max={activeAllowedRanges.at(-1)?.end} inputMode="numeric" value={toPage} onChange={(event) => setToPage(event.target.value)} placeholder={String(activeAllowedRanges[0]?.end ?? 1)} /></label></div><button className="next-button" type="button" onClick={fillNextPages}>次の10ページを入力</button><label>区間名（任意）<input value={studyLabel} onChange={(event) => setStudyLabel(event.target.value)} placeholder="例：第1章 基礎" /></label><label>メモ（任意）<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="例：2章の途中まで" /></label><button className="primary-button wide-button" type="submit">この内容を記録する <span>→</span></button></form></article><article className="history-card card"><div className="section-heading"><div><p className="eyebrow">RECENT ACTIVITY</p><h2>学習履歴</h2></div><span className="activity-count">{activeEntries.length}件</span></div>{activeEntries.length === 0 ? <div className="empty-history"><span>○</span><p>ここに学習履歴が表示されます。<br />まずはページを記録してみましょう。</p></div> : <div className="history-list">{[...activeEntries].sort((a, b) => `${b.date}${b.id}`.localeCompare(`${a.date}${a.id}`)).map((entry) => <div className="history-item" key={entry.id}><div className="history-date">{formatDate(entry.date)}</div><div className="history-detail"><strong>{entry.label || (entry.fromPage === entry.toPage ? `${entry.fromPage}ページ` : `${entry.fromPage}–${entry.toPage}ページ`)}</strong>{entry.label && <span>{entry.fromPage === entry.toPage ? `${entry.fromPage}ページ` : `${entry.fromPage}–${entry.toPage}ページ`}</span>}{entry.note && <span>{entry.note}</span>}</div><button className="delete-button" type="button" aria-label="この記録を削除" onClick={() => removeEntry(entry.id)}>×</button></div>)}</div>}</article></section>
+            <section className="lower-grid"><article className="log-card card"><div className="section-heading"><div><p className="eyebrow">ADD STUDY LOG</p><h2>勉強したページを記録</h2></div><span className="pencil-icon">✎</span></div><form className="study-form" onSubmit={addStudyEntry}><div className="date-input-row">
+<label className="date-field">日付<input type="date" value={studyDate} disabled={studyDateUnknown} onChange={(event) => setStudyDate(event.target.value)} /></label>
+<label className="unknown-date-toggle"><input type="checkbox" checked={studyDateUnknown} onChange={(event) => { const unknown = event.target.checked; setStudyDateUnknown(unknown); if (unknown) setStudyDate(""); else if (!studyDate) setStudyDate(todayString()); }} />日付不明</label>
+</div><div className="page-fields"><label>開始ページ<input type="number" min={activeAllowedRanges[0]?.start} max={activeAllowedRanges.at(-1)?.end} inputMode="numeric" value={fromPage} onChange={(event) => setFromPage(event.target.value)} placeholder={String(activeAllowedRanges[0]?.start ?? 1)} /></label><span>〜</span><label>終了ページ<input type="number" min={activeAllowedRanges[0]?.start} max={activeAllowedRanges.at(-1)?.end} inputMode="numeric" value={toPage} onChange={(event) => setToPage(event.target.value)} placeholder={String(activeAllowedRanges[0]?.end ?? 1)} /></label></div><button className="next-button" type="button" onClick={fillNextPages}>次の10ページを入力</button><label>区間名（任意）<input value={studyLabel} onChange={(event) => setStudyLabel(event.target.value)} placeholder="例：第1章 基礎" /></label><label>メモ（任意）<input value={note} onChange={(event) => setNote(event.target.value)} placeholder="例：2章の途中まで" /></label><button className="primary-button wide-button" type="submit">この内容を記録する <span>→</span></button></form></article><article className="history-card card">
+<div className="section-heading"><div><p className="eyebrow">RECENT ACTIVITY</p><h2>学習履歴</h2></div><span className="activity-count">{activeEntries.length}件</span></div>
+{activeEntries.length === 0 ? <div className="empty-history"><span>○</span><p>ここに学習履歴が表示されます。<br />まずはページを記録してみましょう。</p></div> : <div className="history-list">
+{[...activeEntries].sort((a, b) => (b.date || "").localeCompare(a.date || "") || b.id.localeCompare(a.id)).map((entry) => {
+  const pageText = entry.fromPage === entry.toPage ? entry.fromPage + "ページ" : entry.fromPage + "–" + entry.toPage + "ページ";
+  if (editingEntryId === entry.id) {
+    return (
+      <form className="history-edit-form" key={entry.id} onSubmit={saveEditedEntry}>
+        <div className="history-edit-heading"><strong>学習履歴を編集</strong><span>{pageText}</span></div>
+        <div className="date-input-row">
+          <label className="date-field">日付<input type="date" value={editDate} disabled={editDateUnknown} onChange={(event) => setEditDate(event.target.value)} /></label>
+          <label className="unknown-date-toggle"><input type="checkbox" checked={editDateUnknown} onChange={(event) => { const unknown = event.target.checked; setEditDateUnknown(unknown); if (unknown) setEditDate(""); else if (!editDate) setEditDate(todayString()); }} />日付不明</label>
+        </div>
+        <div className="page-fields"><label>開始ページ<input type="number" min={activeAllowedRanges[0]?.start} max={activeAllowedRanges.at(-1)?.end} inputMode="numeric" value={editFromPage} onChange={(event) => setEditFromPage(event.target.value)} /></label><span>〜</span><label>終了ページ<input type="number" min={activeAllowedRanges[0]?.start} max={activeAllowedRanges.at(-1)?.end} inputMode="numeric" value={editToPage} onChange={(event) => setEditToPage(event.target.value)} /></label></div>
+        <label>区間名（任意）<input value={editLabel} onChange={(event) => setEditLabel(event.target.value)} placeholder="例：第1章 基礎" /></label>
+        <label>メモ（任意）<input value={editNote} onChange={(event) => setEditNote(event.target.value)} placeholder="例：2章の途中まで" /></label>
+        <div className="history-edit-actions"><button className="primary-button" type="submit">変更を保存</button><button className="link-cancel-button" type="button" onClick={cancelEditingEntry}>キャンセル</button></div>
+      </form>
+    );
+  }
+  return (
+    <div className="history-item" key={entry.id}>
+      <div className="history-date">{formatDate(entry.date)}</div>
+      <div className="history-detail"><strong>{entry.label || pageText}</strong>{entry.label && <span>{pageText}</span>}{entry.note && <span>{entry.note}</span>}</div>
+      <div className="history-actions"><button className="edit-button" type="button" onClick={() => startEditingEntry(entry)}>編集</button><button className="delete-button" type="button" aria-label="この記録を削除" onClick={() => removeEntry(entry.id)}>×</button></div>
+    </div>
+  );
+})}
+</div>}
+</article>
+</section>
             <section className="footer-actions"><p>記録はこの端末だけに保存されます。ブラウザのデータを消去すると記録も消えます。</p><button className="delete-book-button" type="button" onClick={removeBook}>この参考書を削除</button></section>
           </>
         )}
