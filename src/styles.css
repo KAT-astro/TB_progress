@@ -199,7 +199,10 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .outline-button:hover { border-color: var(--navy); }
 .section-heading { margin-bottom: 24px; }
 .study-form { display: grid; gap: 14px; }
+.date-input-row { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
 .date-field { max-width: 190px; }
+.unknown-date-toggle { flex-direction: row; align-items: center; gap: 7px; padding-bottom: 11px; color: #817873; font-size: 11px; white-space: nowrap; }
+.unknown-date-toggle input { width: 16px; min-height: 16px; padding: 0; accent-color: var(--coral); }
 .page-fields { display: flex; align-items: end; gap: 10px; }
 .page-fields label { flex: 1; }
 .page-fields > span { padding-bottom: 12px; color: #ada39a; }
@@ -214,8 +217,18 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .history-detail { display: grid; gap: 3px; }
 .history-detail strong { color: var(--navy); font-size: 14px; }
 .history-detail span { color: #928b86; font-size: 10px; }
+.history-actions { display: flex; align-items: center; gap: 6px; }
+.edit-button { min-height: 28px; padding: 0 8px; border: 1px solid #e0d7cf; border-radius: 8px; color: var(--navy); background: #fffdf9; font-size: 10px; font-weight: 800; }
+.edit-button:hover { border-color: var(--navy); background: #f7f3ee; }
 .delete-button { width: 25px; height: 25px; padding: 0; border: 0; border-radius: 50%; color: #aaa19c; background: #f5f1ec; font-size: 17px; }
 .delete-button:hover { color: var(--coral-dark); background: #fae3dd; }
+.history-edit-form { display: grid; gap: 12px; padding: 15px 0; border-top: 1px solid #eee9e2; }
+.history-edit-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.history-edit-heading strong { color: var(--navy); font-size: 13px; }
+.history-edit-heading span { color: #928b86; font-size: 10px; }
+.history-edit-actions { display: flex; gap: 8px; }
+.history-edit-actions .primary-button, .history-edit-actions .link-cancel-button { min-height: 38px; padding: 0 13px; }
+input:disabled { color: #9f9790; background: #f2eee9; cursor: not-allowed; }
 .footer-actions { display: flex; align-items: center; justify-content: space-between; padding: 20px 3px 0; }
 .footer-actions p { margin: 0; color: #a59c94; font-size: 10px; }
 .delete-book-button { color: #a59c94; font-size: 10px; }
@@ -265,6 +278,13 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .calendar-day-number { font-size: 11px; }
   .calendar-entry-count { display: none; }
   .range-input-row .range-name-input { flex-basis: 100%; min-width: 0; }
+  .history-item { grid-template-columns: 58px 1fr; align-items: start; }
+  .history-actions { grid-column: 2; justify-content: end; }
+  .history-edit-actions { flex-direction: column; }
+  .history-edit-actions .primary-button, .history-edit-actions .link-cancel-button { width: 100%; }
+  .date-input-row { align-items: start; flex-direction: column; gap: 8px; }
+  .date-field { max-width: none; width: 100%; }
+  .unknown-date-toggle { padding-bottom: 0; }
   .footer-actions { display: block; }
   .delete-book-button { padding: 15px 0 0; }
 }
